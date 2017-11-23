@@ -128,6 +128,8 @@ class InstaBot:
                  comments_per_day=0,
                  tag_list=['cat', 'car', 'dog'],
                  max_like_for_one_tag=5,
+                 user_list=[],
+                 max_like_for_one_follower=3,
                  unfollow_break_min=15,
                  unfollow_break_max=30,
                  log_mod=0,
@@ -176,6 +178,12 @@ class InstaBot:
         self.tag_list = tag_list
         # Get random tag, from tag_list, and like (1 to n) times.
         self.max_like_for_one_tag = max_like_for_one_tag
+
+        # Default user_list
+        self.user_list = user_list
+        # Max likes for one follower of user
+        self.max_like_for_one_follower = max_like_for_one_follower
+
         # log_mod 0 to console, 1 to file
         self.log_mod = log_mod
         self.s = requests.Session()
@@ -204,6 +212,31 @@ class InstaBot:
         self.populate_user_blacklist()
         signal.signal(signal.SIGTERM, self.cleanup)
         atexit.register(self.cleanup)
+
+    def get_likers_list(self):
+        for user in self.user_list:
+            user_media_url = self.url_media_detail % (user)
+
+            r = self.s.get(user_media_url)
+            all_data = json.loads(r.text)
+
+            self.likers_list = list(all_data['items']['likes']['data']['username'])
+
+            # if (self.login_status):
+            #     log_string = "Get media id by tag: %s" % (tag)
+            #     self.write_log(log_string)
+            #     if self.login_status == 1:
+            #         url_tag = self.url_tag % (tag)
+            #         try:
+            #             r = self.s.get(url_tag)
+            #             all_data = json.loads(r.text)
+            #
+            #             self.media_by_tag = list(all_data['tag']['media']['nodes'])
+            #         except:
+            #             self.media_by_tag = []
+            #             self.write_log("Except on get_media!")
+            #     else:
+            #         return 0
 
     def populate_user_blacklist(self):
         for user in self.user_blacklist:
@@ -330,6 +363,23 @@ class InstaBot:
                     all_data = json.loads(r.text)
 
                     self.media_by_tag = list(all_data['tag']['media']['nodes'])
+                except:
+                    self.media_by_tag = []
+                    self.write_log("Except on get_media!")
+            else:
+                return 0
+
+    def get_media_id_by_username(self, username):
+        if self.login_status:
+            log_string = "Get media id by username: %s" % username
+            self.write_log(log_string)
+
+            if self.login_status == 1:
+                url_user = self.url_user_detail % username
+                try:
+                    r = self.s.get(url_user)
+                    all_data = json.loads(r.text)
+                    self.media_by_tag = list(all_data['user']['media']['nodes'])
                 except:
                     self.media_by_tag = []
                     self.write_log("Except on get_media!")
@@ -555,6 +605,14 @@ class InstaBot:
                 self.write_log(log_string)
         return False
 
+    def auto_like_followers_mod(self):
+        if self.login_status:
+            while True:
+                random.shuffle(self.tag_list)
+                self.get_media_id_by_tag(random.choice(self.tag_list))
+                self.like_all_exist_media(random.randint \
+                                              (1, self.max_like_for_one_tag))
+
     def auto_mod(self):
         """ Star loop, that get media ID by your tag list, and like it """
         if self.login_status:
@@ -584,6 +642,17 @@ class InstaBot:
             time.sleep(3)
             # print("Tic!")
 
+    def new_auto_mod_2(self):
+        for username in self.tag_list:
+            # ------------------- Get media_id -------------------
+            if len(self.media_by_tag) == 0:
+                self.get_media_id_by_username(username)
+                self.this_tag_like_count = 0
+                self.max_tag_like_count = self.max_like_for_one_tag
+            # ------------------- Like -------------------
+            self.new_auto_mod_like()
+            time.sleep(3)
+
     def new_auto_mod_like(self):
         if time.time() > self.next_iteration["Like"] and self.like_per_day != 0 \
                 and len(self.media_by_tag) > 0:
@@ -604,6 +673,7 @@ class InstaBot:
                         self.follow_per_day != 0 and len(self.media_by_tag) > 0:
             if self.media_by_tag[0]["owner"]["id"] == self.user_id:
                 self.write_log("Keep calm - It's your own profile ;)")
+                del self.media_by_tag[0]
                 return
             log_string = "Trying to follow: %s" % (
                 self.media_by_tag[0]["owner"]["id"])
@@ -614,6 +684,7 @@ class InstaBot:
                     [self.media_by_tag[0]["owner"]["id"], time.time()])
                 self.next_iteration["Follow"] = time.time() + \
                                                 self.add_time(self.follow_delay)
+            del self.media_by_tag[0]
 
     def new_auto_mod_unfollow(self):
         if time.time() > self.next_iteration["Unfollow"] and \
